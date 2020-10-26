@@ -1,0 +1,234 @@
+---
+title: "rna-seq"
+author: "Rawan Shraim"
+date: "April 15, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r}
+rm (list = ls())
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install("limma")
+BiocManager::install("edgeR")
+
+library(limma)
+library(edgeR)
+```
+
+```{r}
+
+data= read.table("genecount_09.07.20.txt", header= TRUE, sep ="\t")
+head(data)
+dim(data)
+group= as.factor(c("ERMS","ARMS","ARMS","ERMS","ARMS","ARMS","ERMS","ARMS","ERMS","ERMS","ARMS"))
+
+```
+
+```{r}
+gene_anot=read.table('mart_export.txt', header=TRUE, sep=',')
+head(gene_anot)
+```
+
+
+```{r}
+gene_merge=merge(data, gene_anot, by.x = "geneid", by.y = "Gene.stable.ID", all.x=TRUE)
+head(gene_merge)
+```
+
+
+
+```{r}
+gene_merge$Transcript.stable.ID=NULL
+
+gene_merge=unique(gene_merge)
+head(gene_merge)
+rownames(data)=data$geneid
+data$geneid=NULL
+cpm=cpm(data)
+lcpm = cpm(data, log=TRUE)
+
+
+keep.exprs=filterByExpr(data, group=group)
+data2=data[keep.exprs,]
+
+#Keeps genes with about 10 read counts or more in a minimum number of sampeles. Looking at the number of genes that were removed from the dataset
+print(dim(data2))
+print(dim(data)) 
+```
+
+
+```{r}
+x <- calcNormFactors(data2, method = "TMM")
+design = model.matrix(~0+group)
+
+v=voom(data2, design, plot=TRUE)
+
+```
+
+```{r}
+#PCA Fusion pos vs fusion negative 
+
+data_for_PCA <- t(data2)
+dim(data_for_PCA)
+data_for_PCA=na.omit(data_for_PCA)
+dim(data_for_PCA)
+mds <- cmdscale(dist(data_for_PCA), k=2, eig=TRUE)  
+head(mds$eig)
+
+eig_pc <- mds$eig * 100 / sum(mds$eig)
+# plot the PCA
+png(file="PCA_PropExplainedVariance.png")
+barplot(eig_pc,
+        las=1,
+        xlab="Dimensions", 
+        ylab="Proportion of explained variance (%)", y.axis=NULL,
+        col="darkgrey")
+dev.off()
+
+#Look at percentages expressed by each PC 
+head(eig_pc)
+```
+
+```{r}
+#PCA Plot 
+group2=as.factor(c("neg","pos","pos","neg","pos","pos","neg","pos","neg","neg","pos"))
+SAMPID=as.factor(c("rh70","rh65","rh41","rh36","rh30R","rh30","rh12","rh10","irs56","nchrms","nchs13"))
+
+group <- interaction(group2, SAMPID)
+col=as.factor(as.numeric(group))
+mds <- cmdscale(dist(data_for_PCA)) 
+png(file="PCA_Dim1vsDim2.png")
+plot(mds[,1], -mds[,2], type="n", xlab="Dimension 1", ylab="Dimension 2", main="Metric MDS", col=as.numeric(group2))
+text(mds[,1], -mds[,2], labels = group, cex=.7, col=as.numeric(group2))
+dev.off()
+```
+
+```{r}
+#ARMS comparison to Normal Tissue 
+contr.matrix = makeContrasts(
+  ARMSvsERMS= groupARMS - groupERMS,
+  levels = colnames(design))
+  
+
+vfit = lmFit(v, design)
+vfit <- contrasts.fit(vfit, contrasts=contr.matrix)
+efit=eBayes(vfit)
+summary(decideTests(efit))
+```
+
+```{r}
+#Sig and fold change 
+tfit <- treat(vfit, lfc=1)
+dt <- decideTests(tfit)
+summary(dt)
+```
+
+
+```{r}
+#Getting the statistics between the genes when looking at ARMS and ERMS 
+ARMS.vs.ERMS <- topTreat(tfit, coef=1, n=Inf)
+head(ARMS.vs.ERMS)
+gene_anot$Transcript.stable.ID= NULL
+gene_anot=unique(gene_anot)
+comp=merge(ARMS.vs.ERMS, gene_anot, by.x=0, by.y="Gene.stable.ID", all.x=TRUE)
+head(comp)
+comp3=comp[order(comp$adj.P.Val),]
+head(comp3)
+write.csv(comp3, file = "topgenes_ARMSvsERMS.csv")
+```
+
+```{r}
+library(gplots)
+group2=as.factor(c("neg","pos","pos","neg","pos","pos","neg","pos","neg","neg","pos"))
+
+#Surface protein list from Compartment 
+surface_p=read.table("Compartments_annotation_102419.txt", sep ="\t")
+head(surface_p)
+i=which(surface_p$V5>=5)
+#Only keeping proteins rated 5 and above
+filter_surface=surface_p[i,]
+
+comp4=merge(comp3, filter_surface, by.x="Gene.name", by.y="V2", all.x=TRUE)
+comp4=na.omit(comp4)
+
+#Filtering further using uniprot extracellular lists 
+uniprot=read.table("uniprot_extracellularProteins.txt", sep = "\t", header = TRUE, quote="")
+i=pmatch(comp4$Gene.name, uniprot$Gene.names)
+i2=which(!is.na(i))
+comp5=comp4[i2,]
+i=na.omit(i)
+comp5=comp5[order(comp4$P.Value),]
+
+v2=as.data.frame(v$E)
+v3=merge(v2, gene_anot, by.x=0, by.y="Gene.stable.ID", all.x=TRUE)
+v4=merge(v3, filter_surface, by.x="Gene.name", by.y="V2", all.x=TRUE)
+v4=na.omit(v4)
+
+ARMS.vs.ERMS.gene <- comp5$Gene.name[1:10]
+i <- match(ARMS.vs.ERMS.gene, v4$Gene.name)
+mycol <- colorpanel(1000,"blue","white","red")
+a=match(v4$Row.names[i], rownames(lcpm))
+b=match(rownames(lcpm)[a], v4$Row.names) 
+
+heatmap.2(lcpm[a,], scale="row",
+   labRow=v4$Gene.name[i], labCol=group2,
+   col=mycol, trace="none", density.info="none", cexRow = 1,
+   dendrogram="column")
+
+#Getting the uniprot list of genes shown in the heat map 
+i3=pmatch(ARMS.vs.ERMS.gene, uniprot$Gene.names)
+uniprot_list=uniprot[i3,]
+write.csv(uniprot_list, file="extra_cell_ARMSvsERMS.csv")
+
+
+## Looking at log fold changes with normal 
+ERMSvsNormalgenes = read.table("normalvstype_comp_genes.txt")
+i=which(v3$Gene.name %in% ERMSvsNormalgenes$V1)
+a=which(rownames(lcpm) %in% v3$Row.names[i])
+b=match(rownames(lcpm)[a], v3$Row.names) 
+x=which(rownames(ARMS.vs.ERMS) %in% v3$Row.names[i])
+pval=which(ARMS.vs.ERMS$P.Value[x] <= 0.05)
+i2=rownames(ARMS.vs.ERMS)[x[pval]]
+a2=which(rownames(lcpm) %in% i2)
+b2=match(rownames(lcpm)[a2], v3$Row.names) 
+
+heatmap.2(lcpm[a2,], scale="row",
+   labRow=v3$Gene.name[b2], labCol=group2,
+   col=mycol, trace="none", density.info="none", cexRow = 1,
+   dendrogram="both")
+
+ARMSvsNormalgenes = read.table("normalvsarms_comp_genes.txt")
+i=which(v3$Gene.name %in% ARMSvsNormalgenes$V1 )
+a=which(rownames(lcpm) %in% v3$Row.names[i])
+b=match(rownames(lcpm)[a], v3$Row.names)
+x=which(rownames(ARMS.vs.ERMS) %in% v3$Row.names[i])
+pval=which(ARMS.vs.ERMS$P.Value[x] <= 0.05)
+i2=rownames(ARMS.vs.ERMS)[x[pval]]
+a2=which(rownames(lcpm) %in% i2)
+b2=match(rownames(lcpm)[a2], v3$Row.names) 
+
+heatmap.2(lcpm[a2,], scale="row",
+   labRow=v3$Gene.name[b2], labCol=group2,
+   col=mycol, trace="none", density.info="none", cexRow = 1,
+   dendrogram="both")
+
+
+```
+
+
+
+
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

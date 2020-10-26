@@ -1,0 +1,254 @@
+---
+title: "expression_deGenes"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+rm (list = ls())
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install("limma")
+BiocManager::install("edgeR")
+
+library(limma)
+library(edgeR)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+##control data 
+
+data_erms2=read.table('erms_genes_de2.gct', sep="\t", header=TRUE, check.names = FALSE)
+colnames(data_erms2)[1]="geneid"
+head(data_erms2)
+
+data_arms=read.table('arms_genes_de2.gct', sep="\t", header=TRUE, check.names = FALSE)
+colnames(data_arms)[1]="geneid"
+head(data_arms)
+
+
+tissue=read.table("phenotype_GTEX.txt", sep="\t", header=TRUE)
+head(tissue)
+SMTS= as.factor(c("ERMS","ARMS","ARMS","ERMS","ARMS","ARMS","ERMS","ARMS","ERMS","ERMS","ARMS"))
+SAMPID=as.factor(c("rh70","rh65","rh41","rh36","rh30R","rh30","rh12","rh10","irs56","nchrms","nchs13"))
+rms_g=data.frame(SAMPID, SMTS)
+pheno=rbind(tissue, rms_g)
+
+samples_erms=colnames(data_erms2)
+tissue_id=pheno$SAMPID
+i=match(samples_erms, tissue_id)
+i=i[-(1)]
+pheno2_erms=pheno[i,]
+
+samples_arms=colnames(data_arms)
+i2=match(samples_arms, tissue_id)
+i2=i2[-(1)]
+pheno2_arms=pheno[i,]
+
+```
+
+
+```{r}
+#Melt erms 
+install.packages("reshape")
+library(reshape)
+
+#Rearrange the table for expression
+
+melted_erms <- data.frame(melt(data_erms2))
+head(melted_erms)
+
+melted_erms_pheno=merge(melted_erms, pheno, by.x="variable", by.y="SAMPID", all.x = TRUE)
+head(melted_erms_pheno)
+colnames(melted_erms_pheno) <- c("samplename","geneid", "normalized_counts", "group")
+head(melted_erms_pheno)
+
+#Add gene names to the table 
+gene_anot=read.table('mart_export.txt', header=TRUE, sep=',')
+head(gene_anot)
+gene_anot$Transcript.stable.ID=NULL
+gene_anot$Gene.type=NULL
+head(gene_anot)
+gene_anot=unique(gene_anot)
+head(gene_anot)
+
+#Get final expression table 
+expr_erms=merge(melted_erms_pheno, gene_anot, by.x="geneid", by.y="Gene.stable.ID", all.x=TRUE)
+head(expr_erms)
+
+
+```
+
+
+```{r}
+##Run when you have too many genes and need to split them up 
+melted_erms1 <- data.frame(melt(erms_l1))
+head(melted_erms1)
+
+melted_erms_pheno1=merge(melted_erms1, pheno, by.x="variable", by.y="SAMPID", all.x = TRUE)
+head(melted_erms_pheno1)
+colnames(melted_erms_pheno1) <- c("samplename","geneid", "normalized_counts", "group")
+head(melted_erms_pheno1)
+
+expr_erms1=merge(melted_erms_pheno1, gene_anot, by.x="geneid", by.y="Gene.stable.ID", all.x=TRUE)
+head(expr_erms1)
+expr_erms1=na.omit(expr_erms1)
+```
+
+```{r}
+
+#Plotting of all genes seperately  
+library(ggplot2)
+genes=unique(expr_erms$Gene.name)
+
+for(i in genes){
+  gene_i=which(expr_erms$Gene.name==i)
+  gene_e=expr_erms[gene_i,]
+  ggplot(gene_e) +
+        geom_point(aes(x = group, y = normalized_counts, color = Gene.name)) +
+        xlab("Tissue Type") +
+        ylab("Normalized Counts") +
+        ggtitle(i) +
+        theme_bw() +
+	theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  
+	theme(plot.title=element_text(hjust=0.5))
+  name=paste(i,"10.26_neg.png", sep="")
+  ggsave(name, plot= last_plot())
+  
+}
+
+#Plot all genes together 
+ggplot(expr_erms) +
+        geom_point(aes(x = group, y = normalized_counts, color = Gene.name)) +
+        xlab("Tissue Type") +
+        ylab("Normalized Counts") +
+        ggtitle("Gene Expresion Fusion(-)") +
+        theme_bw() +
+	theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+	theme(plot.title=element_text(hjust=0.5))
+
+
+
+```
+
+
+```{r}
+#Melt ARMS
+
+melted_arms <- data.frame(melt(data_arms))
+head(melted_arms)
+
+melted_arms_pheno=merge(melted_arms, pheno, by.x="variable", by.y="SAMPID", all.x = TRUE)
+head(melted_arms_pheno)
+colnames(melted_arms_pheno) <- c("samplename","geneid", "normalized_counts", "group")
+head(melted_arms_pheno)
+
+
+expr_arms=merge(melted_arms_pheno, gene_anot, by.x="geneid", by.y="Gene.stable.ID", all.x=TRUE)
+head(expr_arms)
+
+```
+
+```{r}
+ggplot(expr_arms) +
+        geom_point(aes(x = group, y = normalized_counts, color = Gene.name)) +
+        xlab("Tissue Type") +
+        ylab("Normalized Counts") +
+        ggtitle("Gene Expresion Fusion(+)") +
+        theme_bw() +
+	theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+	theme(plot.title=element_text(hjust=0.5))
+```
+```{r}
+gene_l=unique(expr_arms$Gene.name)
+for(i in gene_l){
+  gene_i=which(expr_arms$Gene.name==i)
+  gene_e=expr_arms[gene_i,]
+  ggplot(gene_e) +
+        geom_point(aes(x = group, y = normalized_counts, color = Gene.name)) +
+        xlab("Tissue Type") +
+        ylab("Normalized Counts") +
+        ggtitle(i) +
+        theme_bw() +
+	theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  
+	theme(plot.title=element_text(hjust=0.5))
+  name=paste(i,"10.26_pos.png", sep="")
+  ggsave(name, plot= last_plot())
+}
+```
+
+```{r}
+hous_keep=read.table('housekeep_cancer.gct', sep="\t", header=TRUE, check.names = FALSE)
+colnames(hous_keep)[1]="geneid"
+head(hous_keep)
+
+samples_house=colnames(hous_keep)
+i=match(samples_house, tissue_id)
+i=i[-(1)]
+pheno2_house=pheno[i,]
+
+melted_erms <- data.frame(melt(hous_keep))
+head(melted_erms)
+
+melted_house_pheno=merge(melted_erms, pheno, by.x="variable", by.y="SAMPID", all.x = TRUE)
+head(melted_house_pheno)
+colnames(melted_house_pheno) <- c("samplename","geneid", "normalized_counts", "group")
+head(melted_house_pheno)
+
+
+#Get final expression table 
+expr_house=merge(melted_house_pheno, gene_anot, by.x="geneid", by.y="Gene.stable.ID", all.x=TRUE)
+head(expr_house)
+
+```
+
+```{r}
+
+ggplot(expr_house) +
+        geom_point(aes(x = group, y = normalized_counts, color = Gene.name)) +
+        xlab("Tissue Type") +
+        ylab("Normalized Counts") +
+        ggtitle("Gene Expresion Fusion(+)") +
+        theme_bw() +
+	theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+	theme(plot.title=element_text(hjust=0.5))
+
+genes_house=unique(expr_house$Gene.name)
+
+for(i in genes_house){
+  gene_i=which(expr_house$Gene.name==i)
+  gene_e=expr_house[gene_i,]
+  ggplot(gene_e) +
+        geom_point(aes(x = group, y = normalized_counts, color = Gene.name)) +
+        xlab("Tissue Type") +
+        ylab("Normalized Counts") +
+        ggtitle(i) +
+        theme_bw() +
+	theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  
+	theme(plot.title=element_text(hjust=0.5))
+  name=paste(i,"10.26_housekeep.png", sep="")
+  ggsave(name, plot= last_plot())
+  
+}
+
+```
+
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
